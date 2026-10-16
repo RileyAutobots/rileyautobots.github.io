@@ -162,15 +162,23 @@ class SimulatedTelemetryAdapter{constructor(ms=2000){this.ms=ms;this.h=[]}
 class TeslaSSETelemetryAdapter{constructor(url,fallback){this.url=url;this.fb=fallback;this.h=[]}
  subscribe(fn){this.h.push(fn);this.fb&&this.fb.subscribe(u=>{if(u.id!=='RA-CT-001')fn(u)})}
  emit(u){this.h.forEach(f=>f(u))}
- connect(){this.fb&&this.fb.connect();try{this.es=new EventSource(this.url);
-  this.es.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){return}
+ connect(){this.fb&&this.fb.connect();this.stop=false;this.loop()}
+ handle(data){let m;try{m=JSON.parse(data)}catch(_){return}
    if(!m||m.source==='mock'||m.spark==null){this.emit({id:'RA-CT-001',log:'Tesla bridge: mock/unauthorized, keeping demo values'});return}
    const st=m.charging_state==='Charging'?'Charging':(['D','R','N'].includes(m.shift_state)?'Driving ('+m.shift_state+')':'Parked'+(m.shift_state?' ('+m.shift_state+')':''));
    this.emit({id:'RA-CT-001',spark:+m.spark,mode:m.mode,tesla:{...m,stateLabel:st}});
-   this.emit({id:'RA-CT-001',log:`Tesla live · ${m.spark}% · ${m.range_mi!=null?Math.round(m.range_mi)+' mi':''} · ${st}`})};
-  this.es.onerror=()=>{if(this.es.readyState===2)this.emit({id:'RA-CT-001',log:'Tesla bridge unreachable, using demo values'})}}catch(e){}}
+   this.emit({id:'RA-CT-001',log:`Tesla live · ${m.spark}% · ${m.range_mi!=null?Math.round(m.range_mi)+' mi':''} · ${st}`})}
+ async loop(){let wait=3000;while(!this.stop){try{this.ac=new AbortController();
+   const r=await fetch(this.url,{headers:{'Accept':'text/event-stream','X-Access-Key':this.key||'','ngrok-skip-browser-warning':'1'},cache:'no-store',signal:this.ac.signal});
+   if(r.status===401){this.emit({id:'RA-CT-001',log:'Tesla bridge: key rejected, using demo values'});wait=60000;throw 0}
+   if(!r.ok||!r.body)throw 0;wait=3000;const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+   for(;;){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true}).replace(/\r\n?/g,'\n');let i;
+    while((i=buf.indexOf('\n\n'))>=0){const ev=buf.slice(0,i);buf=buf.slice(i+2);
+     const d=ev.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).replace(/^ /,'')).join('\n');if(d)this.handle(d)}}
+  }catch(e){if(this.stop)return;if(wait<60000)this.emit({id:'RA-CT-001',log:'Tesla bridge unreachable, retrying'})}
+  await new Promise(f=>setTimeout(f,wait));wait=Math.min(wait*2,60000)}}
  send(id,cmd){this.emit({id,log:id==='RA-CT-001'?'Commands need virtual key (not enabled)':'CMD '+cmd+' ack'})}
- disconnect(){this.es&&this.es.close();this.fb&&this.fb.disconnect()}}
+ disconnect(){this.stop=true;this.ac&&this.ac.abort();this.fb&&this.fb.disconnect()}}
 function teslaLine(b){const t=b.tesla;if(!t)return '';const age=Math.round((Date.now()-t.ts)/60000);
  return `<div class="mut" style="margin-top:4px;color:var(--cyan)">● LIVE TESLA · ${t.range_mi!=null?Math.round(t.range_mi)+' mi range':''} · ${t.stateLabel} · ${t.charging_state||''}<br>📍 ${t.lat!=null?t.lat.toFixed(3)+', '+t.lon.toFixed(3):'location n/a'} · ${t.bridge?t.bridge.mode:''} · ${age}m ago</div>`}
 /* Live-feed config: never baked into the HTML. Read from #bridge=...&key=... once, persist in localStorage, strip from URL. */
@@ -179,7 +187,7 @@ const LIVE=(()=>{try{const h=new URLSearchParams(location.hash.slice(1));
   history.replaceState(null,'',location.pathname+location.search)}
  if(h.has('disconnect')){localStorage.removeItem('rmc.bridge');localStorage.removeItem('rmc.key');history.replaceState(null,'',location.pathname+location.search)}
  const b=localStorage.getItem('rmc.bridge'),k=localStorage.getItem('rmc.key');return b&&k?{b,k}:null}catch(e){return null}})();
-const telemetry=LIVE?new TeslaSSETelemetryAdapter(LIVE.b+'/stream?key='+encodeURIComponent(LIVE.k),new SimulatedTelemetryAdapter(1500)):new SimulatedTelemetryAdapter(1500);
+const telemetry=LIVE?Object.assign(new TeslaSSETelemetryAdapter(LIVE.b+'/stream',new SimulatedTelemetryAdapter(1500)),{key:LIVE.k}):new SimulatedTelemetryAdapter(1500);
 (function liveBox(){const d=document.createElement('div');d.id='liveBox';
  d.style.cssText='position:fixed;right:10px;bottom:10px;z-index:9999;background:rgba(10,16,28,.92);border:1px solid #2a3b55;border-radius:8px;padding:6px 8px;font:12px system-ui;color:#cfe3ff';
  if(LIVE){d.innerHTML='● Live feed connected <a href="#" style="color:#7fb7ff;margin-left:6px">disconnect</a>';
