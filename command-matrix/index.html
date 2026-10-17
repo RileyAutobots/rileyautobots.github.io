@@ -150,7 +150,7 @@ function renderTuro(){
 /* ---- telemetry adapter ---- */
 class SimulatedTelemetryAdapter{constructor(ms=2000){this.ms=ms;this.h=[]}
  subscribe(fn){this.h.push(fn)}
- connect(){this.t=setInterval(()=>{const b=fleet[Math.floor(Math.random()*fleet.length)];
+ connect(){this.t=setInterval(()=>{const b=fleet[Math.floor(Math.random()*fleet.length)];if(b.tesla)return;
   const u={id:b.id};if(b.mode==='charging')u.spark=Math.min(100,b.spark+2);else u.spark=Math.max(3,b.spark-Math.random()*1.5);
   if(b.callsign==='Spark-1'){u.x=680+Math.sin(Date.now()/4000)*20;u.y=240+Math.cos(Date.now()/4000)*12;u.prog=Math.min(100,b.prog+1)}
   if(b.callsign==='Spark-2'){u.vib=+(b.vib+Math.random()*0.15).toFixed(2);u.drift=+(b.drift+Math.random()*0.05).toFixed(2)}
